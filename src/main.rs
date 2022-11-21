@@ -3,6 +3,7 @@ use image::{GenericImageView, io::Reader as ImReader};
 
 // TODO: remove pub
 pub mod board_game;
+pub mod behaviour;
 pub mod animator;
 
 use board_game::Board;

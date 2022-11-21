@@ -1,4 +1,5 @@
 use crate::animator::{Animation, Builder};
+use crate::behaviour::Behaviour;
 use super::{Game, Player};
 
 use iced::{
@@ -26,6 +27,8 @@ pub struct Board {
     user_action: ActionRequest,
 
     game: Game,
+    p1: Box<dyn Behaviour>,
+    p2: Box<dyn Behaviour>,
 }
 
 impl Board {
@@ -79,6 +82,21 @@ impl Board {
             Vector { x: 0.0, y: (Game::ROW - height) as f32 }
         );
     }
+
+    fn behaviour(&self) -> &Box<dyn Behaviour> {
+        match self.game.player_turn() {
+            Player::Yellow => &self.p2,
+            Player::Red => &self.p1,
+        }
+    }
+
+
+    fn behaviour_mut(&mut self) -> &mut Box<dyn Behaviour> {
+        match self.game.player_turn() {
+            Player::Yellow => &mut self.p2,
+            Player::Red => &mut self.p1,
+        }
+    }
 }
 
 impl Application for Board {
@@ -94,7 +112,7 @@ impl Application for Board {
         let now = Instant::now();
         let sector = 3;
 
-        let board_game = Self {
+        let mut board_game = Self {
             game_state: canvas::Cache::default(),
             animator: canvas::Cache::default(),
             board: canvas::Cache::default(),
@@ -105,7 +123,12 @@ impl Application for Board {
             user_action: ActionRequest::Initialize,
 
             game: Game::default(),
+            p1: Box::new(crate::behaviour::Human),
+            p2: Box::new(crate::behaviour::Random::default()),
         };
+
+        let state = board_game.game;
+        board_game.behaviour_mut().start_process(state);
 
         (board_game, Command::none())
     }
@@ -119,6 +142,14 @@ impl Application for Board {
             Message::Tick(now) => {
                 if self.animation.finished_at(now) {
                     let action =  match self.user_action {
+                        ActionRequest::Initialize => {
+                            if let crate::behaviour::Intent::Some(play) = self.behaviour().intent() {
+                                self.user_action.new_action(ActionRequest::Waiting);
+                                return self.update(Message::Play(play));
+                            } else {
+                                ActionRequest::Waiting
+                            }
+                        },
                         ActionRequest::SlideThenPlay => {
                             let height = self.game.col_filled(self.sector as usize);
 
@@ -135,6 +166,9 @@ impl Application for Board {
 
                             self.initialize_coin();
                             self.sector = 3;
+
+                            let state = self.game;
+                            self.behaviour_mut().start_process(state);
 
                             ActionRequest::Initialize
                         }
@@ -300,6 +334,10 @@ impl canvas::Program<Message> for Board {
         bounds: Rectangle,
         cursor: canvas::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
+        if !self.behaviour().process_intent() {
+            return (canvas::event::Status::Ignored, None);
+        }
+
         let mut message = None;
 
         if let canvas::Event::Mouse(ms_event) = event {
