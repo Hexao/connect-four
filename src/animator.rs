@@ -61,6 +61,10 @@ impl Animation {
         self.start + self.direction * y
     }
 
+    pub fn start_point(&self) -> Point {
+        self.start
+    }
+
     fn compute_t(&self, x: f32) -> f32 {
         let Point { x: x1, .. } = self.control_point1;
         let Point { x: x2, .. } = self.control_point2;

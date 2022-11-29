@@ -14,6 +14,7 @@ pub enum Message {
     Tick(Instant),
     Slide(u8),
     Play(u8),
+    Restart,
 }
 
 pub struct Board {
@@ -35,6 +36,7 @@ impl Board {
     const YELLOW_PLAYER: Color = Color::from_rgb(0.8, 0.8, 0.1);
     const RED_PLAYER: Color = Color::from_rgb(0.8, 0.1, 0.1);
     const BOARD_COLOR: Color = Color::from_rgb(0.1, 0.1, 0.5);
+    const WIN_COLOR: Color = Color::from_rgb(0.1, 1.0, 0.1);
 
     const GRID_OPENING: f32 = 0.8;
     const COIN_SIZE: f32 = 0.85;
@@ -96,6 +98,17 @@ impl Board {
             Player::Yellow => &mut self.p2,
             Player::Red => &mut self.p1,
         }
+    }
+
+    fn restart(&mut self) {
+        self.game.restart();
+
+        self.user_action.new_action(ActionRequest::Initialize);
+        self.animation.update_duration(0.5);
+        self.animation.restart();
+        self.game_state.clear();
+
+        self.initialize_coin();
     }
 }
 
@@ -161,16 +174,28 @@ impl Application for Board {
                             }
                         },
                         ActionRequest::Playing => {
-                            self.game.play_col(self.sector as usize);
                             self.game_state.clear();
 
-                            self.initialize_coin();
-                            self.sector = 3;
+                            if let Ok(Some([x, y, dx, dy])) = self.game.play_col(self.sector as usize) {
+                                self.sliding_curve();
 
-                            let state = self.game;
-                            self.behaviour_mut().start_process(state);
+                                let start = Point { x: 0.5 + x as f32, y: 0.5 + Game::ROW as f32 - y as f32 };
+                                let end = Point { x: 0.5 + dx as f32, y: 0.5 + Game::ROW as f32 - dy as f32 };
+                                let direction = end - start;
 
-                            ActionRequest::Initialize
+                                self.animation.update_axis(start, direction);
+                                self.animation.update_duration(1.0);
+                                self.animation.restart();
+                                ActionRequest::Win
+                            } else {
+                                self.initialize_coin();
+                                self.sector = 3;
+
+                                let state = self.game;
+                                self.behaviour_mut().start_process(state);
+
+                                ActionRequest::Initialize
+                            }
                         }
                         _ => ActionRequest::Waiting
                     };
@@ -210,7 +235,12 @@ impl Application for Board {
                         self.slide_sector(sector);
                     }
                 }
-            }
+            },
+            Message::Restart => {
+                if self.user_action == ActionRequest::Win {
+                    self.restart();
+                }
+            },
         }
 
         Command::none()
@@ -279,19 +309,47 @@ impl canvas::Program<Message> for Board {
         });
 
         let animator = self.animator.draw(bounds.size(), |frame| {
-            let coin_rad = chunk_size * Self::COIN_SIZE * 0.5;
+            if self.user_action != ActionRequest::Win {
+                let coin_rad = chunk_size * Self::COIN_SIZE * 0.5;
 
-            let coin_coef = self.animation.point_at(self.now) - Point::ORIGIN;
-            let coin_vec = coin_coef * chunk_size;
-            let coin_pos = offset + coin_vec;
+                let coin_coef = self.animation.point_at(self.now) - Point::ORIGIN;
+                let coin_vec = coin_coef * chunk_size;
+                let coin_pos = offset + coin_vec;
 
-            let coin = canvas::Path::circle(coin_pos, coin_rad);
-            let coin_color = match self.game.player_turn() {
-                Player::Yellow => Self::YELLOW_PLAYER,
-                Player::Red => Self::RED_PLAYER,
-            };
+                let coin = canvas::Path::circle(coin_pos, coin_rad);
+                let coin_color = match self.game.player_turn() {
+                    Player::Yellow => Self::YELLOW_PLAYER,
+                    Player::Red => Self::RED_PLAYER,
+                };
 
-            frame.fill(&coin, coin_color);
+                frame.fill(&coin, coin_color);
+            } else {
+                let rad = chunk_size * Self::COIN_SIZE * 0.1;
+
+                let start_coef = self.animation.start_point() - Point::ORIGIN;
+                let start_vec = start_coef * chunk_size;
+                let start_pos = offset + start_vec;
+
+                let end_coef = self.animation.point_at(self.now) - Point::ORIGIN;
+                let end_vec = end_coef * chunk_size;
+                let end_pos = offset + end_vec;
+
+                let start = canvas::Path::circle(start_pos, rad);
+                let end = canvas::Path::circle(end_pos, rad);
+
+                frame.fill(&start, Self::WIN_COLOR);
+                frame.fill(&end, Self::WIN_COLOR);
+
+                let Vector { x, y } = end_pos - start_pos;
+                let len = (x*x + y*y).sqrt();
+
+                frame.translate(start_pos - Point::ORIGIN);
+                frame.rotate(y.atan2(x));
+
+                let line = canvas::Path::rectangle(Point { x: 0.0, y: -rad }, iced::Size { width: len, height: rad * 2.0 });
+                frame.fill(&line, Self::WIN_COLOR);
+            }
+
         });
 
         let board = self.board.draw(bounds.size(), |frame| {
@@ -325,7 +383,11 @@ impl canvas::Program<Message> for Board {
             }
         });
 
-        vec![game_state, animator, board]
+        if self.user_action == ActionRequest::Win {
+            vec![game_state, board, animator]
+        } else {
+            vec![game_state, animator, board]
+        }
     }
 
     fn update(
@@ -334,7 +396,7 @@ impl canvas::Program<Message> for Board {
         bounds: Rectangle,
         cursor: canvas::Cursor,
     ) -> (canvas::event::Status, Option<Message>) {
-        if !self.behaviour().process_intent() {
+        if !self.behaviour().process_intent() && self.user_action != ActionRequest::Win {
             return (canvas::event::Status::Ignored, None);
         }
 
@@ -359,6 +421,12 @@ impl canvas::Program<Message> for Board {
                     }
                 }
                 _ => (),
+            }
+        }
+
+        if let canvas::Event::Keyboard(kb_event) = event {
+            if let iced::keyboard::Event::KeyPressed { key_code: iced::keyboard::KeyCode::R, .. } = kb_event {
+                message = Some(Message::Restart);
             }
         }
 

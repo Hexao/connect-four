@@ -19,12 +19,13 @@ impl Game {
     pub const COL: usize = 7;
     pub const ROW: usize = 6;
 
-    pub fn play_col(&mut self, col: usize) -> bool {
+    pub fn play_col(&mut self, col: usize) -> Result<Option<[u8; 4]>, ()> {
         let height = self.col_filled(col);
-        if height == Self::ROW { return false; }
+        if height == Self::ROW { return Err(()); }
 
         let index = col * Self::ROW;
         self.grid[index + height] = Some(self.player_turn.into());
+        let connect = self.connected(col as i8, height as i8);
 
         self.player_turn = match self.player_turn {
             Memory::RedRed => Memory::RedYellow,
@@ -33,7 +34,59 @@ impl Game {
             Memory::YellowYellow => Memory::YellowRed,
         };
 
-        true
+        Ok(connect)
+    }
+
+    fn connected(&self, col: i8, row: i8) -> Option<[u8; 4]> {
+        const DIRS: [(i8, i8); 4] = [(0, -1), (1, 1), (1, 0), (1, -1)];
+        let target = Some(self.player_turn.into());
+
+        for (x, y) in DIRS {
+            let (mut forward, mut backward) = (0, 0);
+
+            loop {
+                if backward == 3 { break; }
+                backward += 1;
+
+                let actual_col = col - x * backward;
+                let actual_row = row - y * backward;
+
+                if !(0..Self::COL as i8).contains(&actual_col) ||
+                   !(0..Self::ROW as i8).contains(&actual_row) ||
+                   self.grid[actual_col as usize * Self::ROW + actual_row as usize] != target
+                {
+                    backward -= 1;
+                    break;
+                }
+            }
+
+            loop {
+                if forward == 3 - backward { break; }
+                forward += 1;
+
+                let actual_col = col + x * forward;
+                let actual_row = row + y * forward;
+
+                if !(0..Self::COL as i8).contains(&actual_col) ||
+                   !(0..Self::ROW as i8).contains(&actual_row) ||
+                   self.grid[actual_col as usize * Self::ROW + actual_row as usize] != target
+                {
+                    forward -= 1;
+                    break;
+                }
+            }
+
+            if forward + backward == 3 {
+                return Some([
+                    (col - x * backward) as u8,
+                    (row - y * backward) as u8,
+                    (col + x * forward) as u8,
+                    (row + y * forward) as u8,
+                ]);
+            }
+        }
+
+        None
     }
 
     pub fn col_filled(&self, col: usize) -> usize {
@@ -49,6 +102,14 @@ impl Game {
 
     pub fn player_turn(&self) -> Player {
         self.player_turn.into()
+    }
+
+    pub fn restart(&mut self) {
+        self.grid = [None; Self::COL * Self::ROW];
+        self.player_turn = match self.player_turn {
+            Memory::RedRed | Memory::RedYellow => Memory::YellowYellow,
+            Memory::YellowRed | Memory::YellowYellow => Memory::RedRed,
+        }
     }
 }
 
