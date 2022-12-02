@@ -3,6 +3,11 @@ pub enum Player {
     Red, Yellow,
 }
 
+pub enum PlayResult {
+    Win([u8; 4]),
+    Error, Pass,
+}
+
 #[derive(Clone, Copy)]
 enum Memory {
     RedRed, RedYellow,
@@ -19,9 +24,9 @@ impl Game {
     pub const COL: usize = 7;
     pub const ROW: usize = 6;
 
-    pub fn play_col(&mut self, col: usize) -> Result<Option<[u8; 4]>, ()> {
+    pub fn play_col(&mut self, col: usize) -> PlayResult {
         let height = self.col_height(col);
-        if height == Self::ROW { return Err(()); }
+        if height == Self::ROW { return PlayResult::Error; }
 
         let index = col * Self::ROW;
         self.grid[index + height] = Some(self.player_turn.into());
@@ -34,10 +39,10 @@ impl Game {
             Memory::YellowYellow => Memory::YellowRed,
         };
 
-        Ok(connect)
+        connect
     }
 
-    fn connected(&self, col: i8, row: i8) -> Option<[u8; 4]> {
+    fn connected(&self, col: i8, row: i8) -> PlayResult {
         const DIRS: [(i8, i8); 4] = [(0, -1), (1, 1), (1, 0), (1, -1)];
         let target = Some(self.player_turn.into());
 
@@ -77,7 +82,7 @@ impl Game {
             }
 
             if forward + backward == 3 {
-                return Some([
+                return PlayResult::Win([
                     (col - x * backward) as u8,
                     (row - y * backward) as u8,
                     (col + x * forward) as u8,
@@ -86,7 +91,7 @@ impl Game {
             }
         }
 
-        None
+        PlayResult::Pass
     }
 
     pub fn col_height(&self, col: usize) -> usize {

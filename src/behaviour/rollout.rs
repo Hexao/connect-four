@@ -1,5 +1,5 @@
+use crate::board_game::{Game, PlayResult};
 use super::{Behaviour, Intent};
-use crate::board_game::Game;
 
 use rand::{prelude::SliceRandom, seq::IteratorRandom};
 
@@ -27,12 +27,12 @@ impl Behaviour for Rollout {
                 let mut intent_score = 0.0;
 
                 match start_state.play_col(intent) {
-                    Ok(None) => (),
-                    Err(_) => {
+                    PlayResult::Pass => (),
+                    PlayResult::Error => {
                         *score = LOSE_SCORE * 2.0;
                         continue;
                     },
-                    Ok(Some(_)) => {
+                    PlayResult::Win(_) => {
                         *score = WIN_SCORE;
                         continue;
                     },
@@ -51,9 +51,9 @@ impl Behaviour for Rollout {
                         };
 
                         match game.play_col(col) {
-                            Err(_) => unreachable!(),
-                            Ok(None) => (),
-                            Ok(Some(_)) => {
+                            PlayResult::Error => unreachable!(),
+                            PlayResult::Pass => (),
+                            PlayResult::Win(_) => {
                                 intent_score += if game.player_turn() == whoami {
                                     // on game.play_col() player turn change. So if player
                                     // turn is mine, this mean i just lose the game.

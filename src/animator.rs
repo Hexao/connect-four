@@ -121,15 +121,12 @@ impl Default for Animation {
     }
 }
 
+#[derive(Default)]
 pub struct Builder {
     animation: Animation,
 }
 
 impl Builder {
-    pub fn new() -> Self {
-        Self { animation: Animation::default() }
-    }
-
     pub fn move_curve(mut self, start: Point, direction: Vector) -> Self {
         self.animation.update_axis(start, direction);
         self

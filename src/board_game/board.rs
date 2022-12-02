@@ -1,6 +1,6 @@
 use crate::animator::{Animation, Builder};
 use crate::behaviour::{Behaviour, Intent};
-use super::{Game, Player};
+use super::{Game, Player, PlayResult};
 
 use iced::{
     Application, Command, Subscription, time,
@@ -85,10 +85,10 @@ impl Board {
         );
     }
 
-    fn behaviour(&self) -> &Box<dyn Behaviour> {
+    fn behaviour(&self) -> &dyn Behaviour {
         match self.game.player_turn() {
-            Player::Yellow => &self.p2,
-            Player::Red => &self.p1,
+            Player::Yellow => self.p2.as_ref(),
+            Player::Red => self.p1.as_ref(),
         }
     }
 
@@ -121,7 +121,7 @@ impl Application for Board {
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<Message>) {
-        let animation = Builder::new()
+        let animation = Builder::default()
             .move_curve(Point::new(Game::COL as f32 / 2.0, -0.5), Vector::new(0.0, 1.0))
             .anim_duration(0.5).build();
 
@@ -186,7 +186,7 @@ impl Application for Board {
                         ActionRequest::Playing => {
                             self.game_state.clear();
 
-                            if let Ok(Some([x, y, dx, dy])) = self.game.play_col(self.sector as usize) {
+                            if let PlayResult::Win([x, y, dx, dy]) = self.game.play_col(self.sector as usize) {
                                 self.sliding_curve();
 
                                 let start = Point { x: 0.5 + x as f32, y: 0.5 + Game::ROW as f32 - y as f32 };
@@ -237,10 +237,8 @@ impl Application for Board {
                     if self.user_action.new_action(ActionRequest::Playing).is_some() {
                         self.play_current_sector(height);
                     };
-                } else {
-                    if self.user_action.new_action(ActionRequest::SlideThenPlay).is_some() {
-                        self.slide_sector(sector);
-                    }
+                } else if self.user_action.new_action(ActionRequest::SlideThenPlay).is_some() {
+                    self.slide_sector(sector);
                 }
             },
             Message::Restart => {
@@ -431,6 +429,7 @@ impl canvas::Program<Message> for Board {
             }
         }
 
+        #[allow(clippy::collapsible_match)]
         if let canvas::Event::Keyboard(kb_event) = event {
             if let iced::keyboard::Event::KeyPressed { key_code: iced::keyboard::KeyCode::R, .. } = kb_event {
                 message = Some(Message::Restart);

@@ -1,6 +1,7 @@
 mod board;
 mod game;
 
+pub use game::PlayResult;
 pub use game::Player;
 pub use game::Game;
 
