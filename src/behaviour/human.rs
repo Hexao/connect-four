@@ -11,7 +11,7 @@ impl Behaviour for Human {
     fn start_process(&mut self, _state: Game) {
     }
 
-    fn intent(&self) -> Intent {
+    fn intent(&mut self) -> Intent {
         Intent::None
     }
 }

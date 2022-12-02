@@ -20,7 +20,7 @@ impl Game {
     pub const ROW: usize = 6;
 
     pub fn play_col(&mut self, col: usize) -> Result<Option<[u8; 4]>, ()> {
-        let height = self.col_filled(col);
+        let height = self.col_height(col);
         if height == Self::ROW { return Err(()); }
 
         let index = col * Self::ROW;
@@ -89,11 +89,15 @@ impl Game {
         None
     }
 
-    pub fn col_filled(&self, col: usize) -> usize {
+    pub fn col_height(&self, col: usize) -> usize {
         let index = col as usize * Self::ROW;
         let chunk = &self.grid[index..index + Self::ROW];
 
-        chunk.iter().take_while(|&&cell| cell != None).count()
+        chunk.iter().take_while(|cell| cell.is_some()).count()
+    }
+
+    pub fn col_full(&self, col: usize) -> bool {
+        self.col_height(col) == Self::ROW
     }
 
     pub fn grid(&self) -> [Option<Player>; Self::ROW * Self::COL] {
@@ -122,9 +126,9 @@ impl Default for Game {
     }
 }
 
-impl Into<Player> for Memory {
-    fn into(self) -> Player {
-        match self {
+impl From<Memory> for Player {
+    fn from(memory: Memory) -> Self {
+        match memory {
             Memory::RedYellow | Memory::YellowYellow => Player::Yellow,
             Memory::RedRed | Memory::YellowRed => Player::Red,
         }

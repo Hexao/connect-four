@@ -1,6 +1,8 @@
+mod rollout;
 mod random;
 mod human;
 
+pub use rollout::Rollout;
 pub use random::Random;
 pub use human::Human;
 
@@ -17,5 +19,5 @@ pub trait Behaviour {
     }
 
     fn start_process(&mut self, state: Game);
-    fn intent(&self) -> Intent;
+    fn intent(&mut self) -> Intent;
 }

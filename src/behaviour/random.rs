@@ -2,6 +2,7 @@ use super::{Behaviour, Intent};
 use crate::board_game::Game;
 
 use rand::prelude::SliceRandom;
+const INVALID: u8 = Game::COL as u8;
 
 pub struct Random {
     generator: rand::rngs::ThreadRng,
@@ -11,7 +12,7 @@ pub struct Random {
 impl Behaviour for Random {
     fn start_process(&mut self, state: Game) {
         let possibilities = (0..Game::COL)
-            .filter(|&col| state.col_filled(col) != Game::ROW)
+            .filter(|&col| !state.col_full(col))
             .collect::<Vec<usize>>();
 
         let col = possibilities
@@ -21,13 +22,17 @@ impl Behaviour for Random {
         self.last_gen = *col as u8;
     }
 
-    fn intent(&self) -> Intent {
-        Intent::Some(self.last_gen)
+    fn intent(&mut self) -> Intent {
+        if self.last_gen == INVALID {
+            Intent::None
+        } else {
+            Intent::Some(std::mem::replace(&mut self.last_gen, INVALID))
+        }
     }
 }
 
 impl Default for Random {
     fn default() -> Self {
-        Self { generator: rand::thread_rng(), last_gen: 3 }
+        Self { generator: rand::thread_rng(), last_gen: INVALID }
     }
 }

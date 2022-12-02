@@ -1,5 +1,5 @@
 use crate::animator::{Animation, Builder};
-use crate::behaviour::Behaviour;
+use crate::behaviour::{Behaviour, Intent};
 use super::{Game, Player};
 
 use iced::{
@@ -103,6 +103,9 @@ impl Board {
     fn restart(&mut self) {
         self.game.restart();
 
+        let game = self.game;
+        self.behaviour_mut().start_process(game);
+
         self.user_action.new_action(ActionRequest::Initialize);
         self.animation.update_duration(0.5);
         self.animation.restart();
@@ -137,7 +140,7 @@ impl Application for Board {
 
             game: Game::default(),
             p1: Box::new(crate::behaviour::Human),
-            p2: Box::new(crate::behaviour::Random::default()),
+            p2: Box::new(crate::behaviour::Rollout::default()),
         };
 
         let state = board_game.game;
@@ -153,18 +156,25 @@ impl Application for Board {
     fn update(&mut self, message: Message) -> Command<Message> {
         match message {
             Message::Tick(now) => {
+                self.animator.clear();
+                self.now = now;
+
                 if self.animation.finished_at(now) {
                     let action =  match self.user_action {
                         ActionRequest::Initialize => {
-                            if let crate::behaviour::Intent::Some(play) = self.behaviour().intent() {
-                                self.user_action.new_action(ActionRequest::Waiting);
-                                return self.update(Message::Play(play));
-                            } else {
-                                ActionRequest::Waiting
+                            let intent = self.behaviour_mut().intent();
+
+                            match intent {
+                                Intent::Some(play) => {
+                                    self.user_action.new_action(ActionRequest::Waiting);
+                                    return self.update(Message::Play(play));
+                                },
+                                Intent::None => ActionRequest::Waiting,
+                                Intent::Waiting => todo!(),
                             }
                         },
                         ActionRequest::SlideThenPlay => {
-                            let height = self.game.col_filled(self.sector as usize);
+                            let height = self.game.col_height(self.sector as usize);
 
                             if height != Game::ROW {
                                 self.play_current_sector(height);
@@ -202,9 +212,6 @@ impl Application for Board {
 
                     self.user_action.new_action(action);
                 }
-
-                self.animator.clear();
-                self.now = now;
             },
             Message::Slide(sector) => {
                 let Some(old) = self.user_action.new_action(ActionRequest::Sliding) else {
@@ -224,7 +231,7 @@ impl Application for Board {
             },
             Message::Play(sector) => {
                 if self.sector == sector && self.user_action == ActionRequest::Waiting {
-                    let height = self.game.col_filled(self.sector as usize);
+                    let height = self.game.col_height(self.sector as usize);
                     if height == Game::ROW { return Command::none(); }
 
                     if self.user_action.new_action(ActionRequest::Playing).is_some() {
