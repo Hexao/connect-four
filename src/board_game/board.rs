@@ -170,7 +170,15 @@ impl Application for Board {
                                     return self.update(Message::Play(play));
                                 },
                                 Intent::None => ActionRequest::Waiting,
-                                Intent::Waiting => todo!(),
+                                Intent::Waiting => {
+                                    let handle = self.behaviour_mut().handle();
+                                    async fn wait_handle(handle: std::thread::JoinHandle<u8>) -> u8 {
+                                        handle.join().unwrap()
+                                    }
+
+                                    self.user_action.new_action(ActionRequest::Waiting);
+                                    return Command::perform(wait_handle(handle), Message::Play);
+                                }
                             }
                         },
                         ActionRequest::SlideThenPlay => {

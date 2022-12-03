@@ -20,4 +20,8 @@ pub trait Behaviour {
 
     fn start_process(&mut self, state: Game);
     fn intent(&mut self) -> Intent;
+
+    fn handle(&mut self) -> std::thread::JoinHandle<u8> {
+        unimplemented!()
+    }
 }

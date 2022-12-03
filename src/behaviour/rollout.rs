@@ -107,6 +107,13 @@ impl Behaviour for Rollout {
             Intent::Waiting
         }
     }
+
+    fn handle(&mut self) -> std::thread::JoinHandle<u8> {
+        match self.handle.take() {
+            None => panic!("no handle to give"),
+            Some(handle) => handle,
+        }
+    }
 }
 
 impl Default for Rollout {

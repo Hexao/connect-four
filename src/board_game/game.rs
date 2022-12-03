@@ -53,12 +53,12 @@ impl Game {
                 if backward == 3 { break; }
                 backward += 1;
 
-                let actual_col = col - x * backward;
-                let actual_row = row - y * backward;
+                let actual_col = (col - x * backward) as usize;
+                let actual_row = (row - y * backward) as usize;
 
-                if !(0..Self::COL as i8).contains(&actual_col) ||
-                   !(0..Self::ROW as i8).contains(&actual_row) ||
-                   self.grid[actual_col as usize * Self::ROW + actual_row as usize] != target
+                if !(0..Self::COL).contains(&actual_col) ||
+                   !(0..Self::ROW).contains(&actual_row) ||
+                   self.grid[actual_col * Self::ROW + actual_row] != target
                 {
                     backward -= 1;
                     break;
@@ -69,12 +69,12 @@ impl Game {
                 if forward == 3 - backward { break; }
                 forward += 1;
 
-                let actual_col = col + x * forward;
-                let actual_row = row + y * forward;
+                let actual_col = (col + x * forward) as usize;
+                let actual_row = (row + y * forward) as usize;
 
-                if !(0..Self::COL as i8).contains(&actual_col) ||
-                   !(0..Self::ROW as i8).contains(&actual_row) ||
-                   self.grid[actual_col as usize * Self::ROW + actual_row as usize] != target
+                if !(0..Self::COL).contains(&actual_col) ||
+                   !(0..Self::ROW).contains(&actual_row) ||
+                   self.grid[actual_col * Self::ROW + actual_row] != target
                 {
                     forward -= 1;
                     break;
