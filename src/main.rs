@@ -1,4 +1,4 @@
-use iced::{Application, Settings, window::{self, Icon}};
+use iced::{Application, window::{self, Icon}};
 use image::{GenericImageView, io::Reader as ImReader};
 
 // TODO: remove pub
@@ -6,7 +6,7 @@ pub mod board_game;
 pub mod behaviour;
 pub mod animator;
 
-use board_game::Board;
+use board_game::Menu;
 
 pub fn main() -> iced::Result {
     const WINDOW_SIZE: u32 = 720;
@@ -25,7 +25,7 @@ pub fn main() -> iced::Result {
         _ => None,
     };
 
-    Board::run(Settings {
+    Menu::run(iced::Settings {
         antialiasing: true,
         window: window::Settings {
             size: (WINDOW_SIZE, WINDOW_SIZE),

@@ -3,12 +3,12 @@ use crate::behaviour::{Behaviour, Intent};
 use super::{Game, Player, PlayResult};
 
 use iced::{
-    Application, Command, Subscription, time,
-    Element, Canvas, Length, Point, Vector,
-    Rectangle, Color, canvas,
+    Point, Vector, Rectangle,
+    Command, Color, canvas,
 };
 
 use std::time::Instant;
+
 #[derive(Debug)]
 pub enum Message {
     Tick(Instant),
@@ -40,6 +40,163 @@ impl Board {
 
     const GRID_OPENING: f32 = 0.8;
     const COIN_SIZE: f32 = 0.85;
+
+    pub fn new(mut p1: Box<dyn Behaviour>, p2: Box<dyn Behaviour>) -> Self {
+        let animation = Builder::default()
+            .move_curve(Point::new(Game::COL as f32 / 2.0, -0.5), Vector::new(0.0, 1.0))
+            .anim_duration(0.5).build();
+
+        let game = Game::default();
+        p1.start_process(game);
+
+        Self {
+            game_state: canvas::Cache::default(),
+            animator: canvas::Cache::default(),
+            board: canvas::Cache::default(),
+
+            sector: 3,
+            now: Instant::now(),
+            animation,
+            user_action: ActionRequest::Initialize,
+
+            game, p1, p2,
+        }
+    }
+
+    pub fn handle_message(&mut self, message: Message) -> Command<Message> {
+        match message {
+            Message::Tick(now) => {
+                return self.update(now);
+            },
+            Message::Slide(sector) => {
+                self.slide(sector);
+            },
+            Message::Play(sector) => {
+                self.play(sector);
+            },
+            Message::Restart => {
+                self.restart();
+            },
+        }
+
+        Command::none()
+    }
+
+    pub fn animation_finished(&self) -> bool {
+        self.animation.finished_at(self.now)
+    }
+
+    fn update(&mut self, now: Instant) -> Command<Message> {
+        self.animator.clear();
+        self.now = now;
+
+        if self.animation.finished_at(now) {
+            let action =  match self.user_action {
+                ActionRequest::Initialize => {
+                    match self.behaviour_mut().intent() {
+                        Intent::None => ActionRequest::Waiting,
+                        Intent::Some(sector) => {
+                            self.user_action.new_action(ActionRequest::Waiting);
+                            self.play(sector);
+
+                            return Command::none();
+                        },
+                        Intent::Waiting => {
+                            let handle = self.behaviour_mut().handle();
+                            self.user_action.new_action(ActionRequest::Waiting);
+
+                            return Command::perform(wait_handle(handle), Message::Play);
+                        }
+                    }
+                },
+                ActionRequest::SlideThenPlay => {
+                    let height = self.game.col_height(self.sector as usize);
+
+                    if height != Game::ROW {
+                        self.play_current_sector(height);
+                        ActionRequest::Playing
+                    } else {
+                        ActionRequest::Waiting
+                    }
+                },
+                ActionRequest::Playing => {
+                    self.game_state.clear();
+
+                    if let PlayResult::Win([x, y, dx, dy]) = self.game.play_col(self.sector as usize) {
+                        self.sliding_curve();
+
+                        let start = Point { x: 0.5 + x as f32, y: 0.5 + Game::ROW as f32 - y as f32 };
+                        let end = Point { x: 0.5 + dx as f32, y: 0.5 + Game::ROW as f32 - dy as f32 };
+                        let direction = end - start;
+
+                        self.animation.update_axis(start, direction);
+                        self.animation.update_duration(1.0);
+                        self.animation.restart();
+                        ActionRequest::Win
+                    } else {
+                        self.initialize_coin();
+                        self.sector = 3;
+
+                        let state = self.game;
+                        self.behaviour_mut().start_process(state);
+
+                        ActionRequest::Initialize
+                    }
+                }
+                _ => ActionRequest::Waiting
+            };
+
+            self.user_action.new_action(action);
+        }
+
+        Command::none()
+    }
+
+    fn slide(&mut self, sector: u8) {
+        let Some(old) = self.user_action.new_action(ActionRequest::Sliding) else {
+            return;
+        };
+
+        self.slide_sector(sector);
+
+        if old == ActionRequest::Sliding {
+            self.animation.update_ctrl(
+                Point { x: 0.4, y: 0.4 },
+                Point { x: 0.5, y: 1.0 }
+            );
+        } else {
+            self.sliding_curve();
+        }
+    }
+
+    fn play(&mut self, sector: u8) {
+        if self.sector == sector && self.user_action == ActionRequest::Waiting {
+            let height = self.game.col_height(self.sector as usize);
+            if height == Game::ROW { return; }
+
+            if self.user_action.new_action(ActionRequest::Playing).is_some() {
+                self.play_current_sector(height);
+            };
+        } else if self.user_action.new_action(ActionRequest::SlideThenPlay).is_some() {
+            self.slide_sector(sector);
+        }
+    }
+
+    fn restart(&mut self) {
+        if self.user_action == ActionRequest::Win {
+            self.game.restart();
+
+            let game = self.game;
+            self.behaviour_mut().start_process(game);
+
+            self.user_action.new_action(ActionRequest::Initialize);
+            self.animation.update_duration(0.5);
+            self.animation.restart();
+            self.game_state.clear();
+
+            self.initialize_coin();
+        }
+    }
 
     fn initialize_coin(&mut self) {
         self.sliding_curve();
@@ -98,182 +255,6 @@ impl Board {
             Player::Yellow => &mut self.p2,
             Player::Red => &mut self.p1,
         }
-    }
-
-    fn restart(&mut self) {
-        self.game.restart();
-
-        let game = self.game;
-        self.behaviour_mut().start_process(game);
-
-        self.user_action.new_action(ActionRequest::Initialize);
-        self.animation.update_duration(0.5);
-        self.animation.restart();
-        self.game_state.clear();
-
-        self.initialize_coin();
-    }
-}
-
-impl Application for Board {
-    type Executor = iced::executor::Default;
-    type Message = Message;
-    type Flags = ();
-
-    fn new(_flags: ()) -> (Self, Command<Message>) {
-        let animation = Builder::default()
-            .move_curve(Point::new(Game::COL as f32 / 2.0, -0.5), Vector::new(0.0, 1.0))
-            .anim_duration(0.5).build();
-
-        let now = Instant::now();
-        let sector = 3;
-
-        let mut board_game = Self {
-            game_state: canvas::Cache::default(),
-            animator: canvas::Cache::default(),
-            board: canvas::Cache::default(),
-
-            sector,
-            now,
-            animation,
-            user_action: ActionRequest::Initialize,
-
-            game: Game::default(),
-            p1: Box::new(crate::behaviour::Human),
-            p2: Box::new(crate::behaviour::Rollout::default()),
-        };
-
-        let state = board_game.game;
-        board_game.behaviour_mut().start_process(state);
-
-        (board_game, Command::none())
-    }
-
-    fn title(&self) -> String {
-        String::from("Connect four")
-    }
-
-    fn update(&mut self, message: Message) -> Command<Message> {
-        match message {
-            Message::Tick(now) => {
-                self.animator.clear();
-                self.now = now;
-
-                if self.animation.finished_at(now) {
-                    let action =  match self.user_action {
-                        ActionRequest::Initialize => {
-                            let intent = self.behaviour_mut().intent();
-
-                            match intent {
-                                Intent::Some(play) => {
-                                    self.user_action.new_action(ActionRequest::Waiting);
-                                    return self.update(Message::Play(play));
-                                },
-                                Intent::None => ActionRequest::Waiting,
-                                Intent::Waiting => {
-                                    let handle = self.behaviour_mut().handle();
-                                    async fn wait_handle(handle: std::thread::JoinHandle<u8>) -> u8 {
-                                        handle.join().unwrap()
-                                    }
-
-                                    self.user_action.new_action(ActionRequest::Waiting);
-                                    return Command::perform(wait_handle(handle), Message::Play);
-                                }
-                            }
-                        },
-                        ActionRequest::SlideThenPlay => {
-                            let height = self.game.col_height(self.sector as usize);
-
-                            if height != Game::ROW {
-                                self.play_current_sector(height);
-                                ActionRequest::Playing
-                            } else {
-                                ActionRequest::Waiting
-                            }
-                        },
-                        ActionRequest::Playing => {
-                            self.game_state.clear();
-
-                            if let PlayResult::Win([x, y, dx, dy]) = self.game.play_col(self.sector as usize) {
-                                self.sliding_curve();
-
-                                let start = Point { x: 0.5 + x as f32, y: 0.5 + Game::ROW as f32 - y as f32 };
-                                let end = Point { x: 0.5 + dx as f32, y: 0.5 + Game::ROW as f32 - dy as f32 };
-                                let direction = end - start;
-
-                                self.animation.update_axis(start, direction);
-                                self.animation.update_duration(1.0);
-                                self.animation.restart();
-                                ActionRequest::Win
-                            } else {
-                                self.initialize_coin();
-                                self.sector = 3;
-
-                                let state = self.game;
-                                self.behaviour_mut().start_process(state);
-
-                                ActionRequest::Initialize
-                            }
-                        }
-                        _ => ActionRequest::Waiting
-                    };
-
-                    self.user_action.new_action(action);
-                }
-            },
-            Message::Slide(sector) => {
-                let Some(old) = self.user_action.new_action(ActionRequest::Sliding) else {
-                    return Command::none();
-                };
-
-                self.slide_sector(sector);
-
-                if old == ActionRequest::Sliding {
-                    self.animation.update_ctrl(
-                        Point { x: 0.4, y: 0.4 },
-                        Point { x: 0.5, y: 1.0 }
-                    );
-                } else {
-                    self.sliding_curve();
-                }
-            },
-            Message::Play(sector) => {
-                if self.sector == sector && self.user_action == ActionRequest::Waiting {
-                    let height = self.game.col_height(self.sector as usize);
-                    if height == Game::ROW { return Command::none(); }
-
-                    if self.user_action.new_action(ActionRequest::Playing).is_some() {
-                        self.play_current_sector(height);
-                    };
-                } else if self.user_action.new_action(ActionRequest::SlideThenPlay).is_some() {
-                    self.slide_sector(sector);
-                }
-            },
-            Message::Restart => {
-                if self.user_action == ActionRequest::Win {
-                    self.restart();
-                }
-            },
-        }
-
-        Command::none()
-    }
-
-    fn subscription(&self) -> Subscription<Message> {
-        use std::time::Duration;
-
-        if !self.animation.finished_at(self.now) {
-            time::every(Duration::from_millis(16)).map(Message::Tick)
-        } else {
-            Subscription::none()
-        }
-    }
-
-    fn view(&mut self) -> Element<Message> {
-        Canvas::new(self)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .into()
     }
 }
 
@@ -492,4 +473,8 @@ impl ActionRequest {
             _ => None,
         }
     }
+}
+
+async fn wait_handle(handle: std::thread::JoinHandle<u8>) -> u8 {
+    handle.join().unwrap()
 }
