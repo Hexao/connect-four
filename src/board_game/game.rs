@@ -113,6 +113,10 @@ impl Game {
         self.player_turn.into()
     }
 
+    pub fn grid_full(&self) -> bool {
+        self.grid.iter().all(Option::is_some)
+    }
+
     pub fn restart(&mut self) {
         self.grid = [None; Self::COL * Self::ROW];
         self.player_turn = match self.player_turn {

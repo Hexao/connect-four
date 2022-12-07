@@ -25,7 +25,7 @@ pub struct Board {
     sector: u8,
     now: Instant,
     animation: Animation,
-    user_action: ActionRequest,
+    board_state: BoardState,
 
     game: Game,
     p1: Box<dyn Behaviour>,
@@ -57,7 +57,7 @@ impl Board {
             sector: 3,
             now: Instant::now(),
             animation,
-            user_action: ActionRequest::Initialize,
+            board_state: BoardState::Initialize,
 
             game, p1, p2,
         }
@@ -91,35 +91,35 @@ impl Board {
         self.now = now;
 
         if self.animation.finished_at(now) {
-            let action =  match self.user_action {
-                ActionRequest::Initialize => {
+            let action =  match self.board_state {
+                BoardState::Initialize => {
                     match self.behaviour_mut().intent() {
-                        Intent::None => ActionRequest::Waiting,
+                        Intent::None => BoardState::Waiting,
                         Intent::Some(sector) => {
-                            self.user_action.new_action(ActionRequest::Waiting);
+                            self.board_state.new_action(BoardState::Waiting);
                             self.play(sector);
 
                             return Command::none();
                         },
                         Intent::Waiting => {
                             let handle = self.behaviour_mut().handle();
-                            self.user_action.new_action(ActionRequest::Waiting);
+                            self.board_state.new_action(BoardState::Waiting);
 
                             return Command::perform(wait_handle(handle), Message::Play);
                         }
                     }
                 },
-                ActionRequest::SlideThenPlay => {
+                BoardState::SlideThenPlay => {
                     let height = self.game.col_height(self.sector as usize);
 
                     if height != Game::ROW {
                         self.play_current_sector(height);
-                        ActionRequest::Playing
+                        BoardState::Playing
                     } else {
-                        ActionRequest::Waiting
+                        BoardState::Waiting
                     }
                 },
-                ActionRequest::Playing => {
+                BoardState::Playing => {
                     self.game_state.clear();
 
                     if let PlayResult::Win([x, y, dx, dy]) = self.game.play_col(self.sector as usize) {
@@ -132,7 +132,9 @@ impl Board {
                         self.animation.update_axis(start, direction);
                         self.animation.update_duration(1.0);
                         self.animation.restart();
-                        ActionRequest::Win
+                        BoardState::Win
+                    } else if self.game.grid_full() {
+                        BoardState::Finished
                     } else {
                         self.initialize_coin();
                         self.sector = 3;
@@ -140,26 +142,26 @@ impl Board {
                         let state = self.game;
                         self.behaviour_mut().start_process(state);
 
-                        ActionRequest::Initialize
+                        BoardState::Initialize
                     }
                 }
-                _ => ActionRequest::Waiting
+                _ => BoardState::Waiting
             };
 
-            self.user_action.new_action(action);
+            self.board_state.new_action(action);
         }
 
         Command::none()
     }
 
     fn slide(&mut self, sector: u8) {
-        let Some(old) = self.user_action.new_action(ActionRequest::Sliding) else {
+        let Some(old) = self.board_state.new_action(BoardState::Sliding) else {
             return;
         };
 
         self.slide_sector(sector);
 
-        if old == ActionRequest::Sliding {
+        if old == BoardState::Sliding {
             self.animation.update_ctrl(
                 Point { x: 0.4, y: 0.4 },
                 Point { x: 0.5, y: 1.0 }
@@ -170,26 +172,26 @@ impl Board {
     }
 
     fn play(&mut self, sector: u8) {
-        if self.sector == sector && self.user_action == ActionRequest::Waiting {
+        if self.sector == sector && self.board_state == BoardState::Waiting {
             let height = self.game.col_height(self.sector as usize);
             if height == Game::ROW { return; }
 
-            if self.user_action.new_action(ActionRequest::Playing).is_some() {
+            if self.board_state.new_action(BoardState::Playing).is_some() {
                 self.play_current_sector(height);
             };
-        } else if self.user_action.new_action(ActionRequest::SlideThenPlay).is_some() {
+        } else if self.board_state.new_action(BoardState::SlideThenPlay).is_some() {
             self.slide_sector(sector);
         }
     }
 
     fn restart(&mut self) {
-        if self.user_action == ActionRequest::Win {
+        if self.board_state.finished() {
             self.game.restart();
 
             let game = self.game;
             self.behaviour_mut().start_process(game);
 
-            self.user_action.new_action(ActionRequest::Initialize);
+            self.board_state.new_action(BoardState::Initialize);
             self.animation.update_duration(0.5);
             self.animation.restart();
             self.game_state.clear();
@@ -249,7 +251,6 @@ impl Board {
         }
     }
 
-
     fn behaviour_mut(&mut self) -> &mut Box<dyn Behaviour> {
         match self.game.player_turn() {
             Player::Yellow => &mut self.p2,
@@ -268,11 +269,7 @@ fn offset_and_chunk_size(bounds: iced::Size) -> (Point, f32) {
 }
 
 impl canvas::Program<Message> for Board {
-    fn draw(
-        &self,
-        bounds: Rectangle,
-        _cursor: canvas::Cursor,
-    ) -> Vec<canvas::Geometry> {
+    fn draw(&self, bounds: Rectangle, _cursor: canvas::Cursor) -> Vec<canvas::Geometry> {
         let (offset, chunk_size) = offset_and_chunk_size(bounds.size());
 
         let game_state = self.game_state.draw(bounds.size(), |frame| {
@@ -287,63 +284,68 @@ impl canvas::Program<Message> for Board {
                     iced::Size { width: chunk_size, height: chunk_size }
                 );
 
-                match cell {
-                    Some(Player::Yellow) => frame.fill(&coin, Self::YELLOW_PLAYER),
-                    Some(Player::Red) => frame.fill(&coin, Self::RED_PLAYER),
-                    None => (),
-                }
-
                 y -= 1.0;
 
                 if y < 0.5 {
                     y = Game::ROW as f32;
                     x += 1.0;
                 }
+
+                let color = match cell {
+                    Some(Player::Yellow) => Self::YELLOW_PLAYER,
+                    Some(Player::Red) => Self::RED_PLAYER,
+                    None => continue,
+                };
+
+                frame.fill(&coin, color);
             }
         });
 
         let animator = self.animator.draw(bounds.size(), |frame| {
-            if self.user_action != ActionRequest::Win {
-                let coin_rad = chunk_size * Self::COIN_SIZE * 0.5;
+            match self.board_state {
+                BoardState::Finished => (),
+                BoardState::Win => {
+                    let rad = chunk_size * Self::COIN_SIZE * 0.1;
 
-                let coin_coef = self.animation.point_at(self.now) - Point::ORIGIN;
-                let coin_vec = coin_coef * chunk_size;
-                let coin_pos = offset + coin_vec;
+                    let start_coef = self.animation.start_point() - Point::ORIGIN;
+                    let start_vec = start_coef * chunk_size;
+                    let start_pos = offset + start_vec;
 
-                let coin = canvas::Path::circle(coin_pos, coin_rad);
-                let coin_color = match self.game.player_turn() {
-                    Player::Yellow => Self::YELLOW_PLAYER,
-                    Player::Red => Self::RED_PLAYER,
-                };
+                    let end_coef = self.animation.point_at(self.now) - Point::ORIGIN;
+                    let end_vec = end_coef * chunk_size;
+                    let end_pos = offset + end_vec;
 
-                frame.fill(&coin, coin_color);
-            } else {
-                let rad = chunk_size * Self::COIN_SIZE * 0.1;
+                    let start = canvas::Path::circle(start_pos, rad);
+                    let end = canvas::Path::circle(end_pos, rad);
 
-                let start_coef = self.animation.start_point() - Point::ORIGIN;
-                let start_vec = start_coef * chunk_size;
-                let start_pos = offset + start_vec;
+                    frame.fill(&start, Self::WIN_COLOR);
+                    frame.fill(&end, Self::WIN_COLOR);
 
-                let end_coef = self.animation.point_at(self.now) - Point::ORIGIN;
-                let end_vec = end_coef * chunk_size;
-                let end_pos = offset + end_vec;
+                    let Vector { x, y } = end_pos - start_pos;
+                    let len = (x*x + y*y).sqrt();
 
-                let start = canvas::Path::circle(start_pos, rad);
-                let end = canvas::Path::circle(end_pos, rad);
+                    frame.translate(start_pos - Point::ORIGIN);
+                    frame.rotate(y.atan2(x));
 
-                frame.fill(&start, Self::WIN_COLOR);
-                frame.fill(&end, Self::WIN_COLOR);
+                    let line = canvas::Path::rectangle(Point { x: 0.0, y: -rad }, iced::Size { width: len, height: rad * 2.0 });
+                    frame.fill(&line, Self::WIN_COLOR);
+                }
+                _ => {
+                    let coin_rad = chunk_size * Self::COIN_SIZE * 0.5;
 
-                let Vector { x, y } = end_pos - start_pos;
-                let len = (x*x + y*y).sqrt();
+                    let coin_coef = self.animation.point_at(self.now) - Point::ORIGIN;
+                    let coin_vec = coin_coef * chunk_size;
+                    let coin_pos = offset + coin_vec;
 
-                frame.translate(start_pos - Point::ORIGIN);
-                frame.rotate(y.atan2(x));
+                    let coin = canvas::Path::circle(coin_pos, coin_rad);
+                    let coin_color = match self.game.player_turn() {
+                        Player::Yellow => Self::YELLOW_PLAYER,
+                        Player::Red => Self::RED_PLAYER,
+                    };
 
-                let line = canvas::Path::rectangle(Point { x: 0.0, y: -rad }, iced::Size { width: len, height: rad * 2.0 });
-                frame.fill(&line, Self::WIN_COLOR);
+                    frame.fill(&coin, coin_color);
+                }
             }
-
         });
 
         let board = self.board.draw(bounds.size(), |frame| {
@@ -377,27 +379,22 @@ impl canvas::Program<Message> for Board {
             }
         });
 
-        if self.user_action == ActionRequest::Win {
+        if self.board_state.finished() {
             vec![game_state, board, animator]
         } else {
             vec![game_state, animator, board]
         }
     }
 
-    fn update(
-        &mut self,
-        event: canvas::Event,
-        bounds: Rectangle,
-        cursor: canvas::Cursor,
-    ) -> (canvas::event::Status, Option<Message>) {
-        if !self.behaviour().process_intent() && self.user_action != ActionRequest::Win {
+    fn update(&mut self, event: canvas::Event, bounds: Rectangle, cursor: canvas::Cursor) -> (canvas::event::Status, Option<Message>) {
+        if !self.board_state.finished() && !self.behaviour().process_intent() {
             return (canvas::event::Status::Ignored, None);
         }
 
         let mut message = None;
 
-        if let canvas::Event::Mouse(ms_event) = event {
-            match ms_event {
+        match event {
+            canvas::Event::Mouse(ms_event) => match ms_event {
                 iced::mouse::Event::CursorMoved { position } => {
                     let (offset, chunk_size) = offset_and_chunk_size(bounds.size());
                     let sector = ((position.x - offset.x) / chunk_size).clamp(0.0, Game::COL as f32 - 1.0) as u8;
@@ -416,12 +413,10 @@ impl canvas::Program<Message> for Board {
                 }
                 _ => (),
             }
-        }
-
-        #[allow(clippy::collapsible_match)]
-        if let canvas::Event::Keyboard(kb_event) = event {
-            if let iced::keyboard::Event::KeyPressed { key_code: iced::keyboard::KeyCode::R, .. } = kb_event {
-                message = Some(Message::Restart);
+            canvas::Event::Keyboard(kb_event) => {
+                if let iced::keyboard::Event::KeyPressed { key_code: iced::keyboard::KeyCode::R, .. } = kb_event {
+                    message = Some(Message::Restart);
+                }
             }
         }
 
@@ -430,16 +425,17 @@ impl canvas::Program<Message> for Board {
 }
 
 #[derive(PartialEq, Eq)]
-enum ActionRequest {
+enum BoardState {
     Initialize,
     Waiting,
     Sliding,
     SlideThenPlay,
     Playing,
     Win,
+    Finished,
 }
 
-impl ActionRequest {
+impl BoardState {
     fn new_action(&mut self, action: Self) -> Option<Self> {
         match (self, action) {
             (init @ Self::Initialize, Self::Waiting) => {
@@ -462,19 +458,26 @@ impl ActionRequest {
                 *slide = action;
                 Some(Self::SlideThenPlay)
             },
-            (play @ Self::Playing, action @ (Self::Initialize | Self::Win)) => {
+            (play @ Self::Playing, action @ (Self::Initialize | Self::Win | Self::Finished)) => {
                 *play = action;
                 Some(Self::Playing)
             },
-            (win @ Self::Win, Self::Initialize) => {
-                *win = Self::Initialize;
-                Some(Self::Win)
+            (win @ (Self::Win | Self::Finished), Self::Initialize) => {
+                Some(std::mem::replace(win, Self::Initialize))
             },
             _ => None,
         }
     }
+
+    fn finished(&self) -> bool {
+        *self == BoardState::Win || *self == BoardState::Finished
+    }
 }
 
 async fn wait_handle(handle: std::thread::JoinHandle<u8>) -> u8 {
-    handle.join().unwrap()
+    let Ok(play) = handle.join() else {
+        panic!("wait_handle: failed to join thread !");
+    };
+
+    play
 }

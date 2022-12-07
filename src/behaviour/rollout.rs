@@ -41,7 +41,7 @@ impl Behaviour for Rollout {
                 for _ in 0..iter {
                     let mut game = start_state;
 
-                    for _ in 1..deep {
+                    for actual_deep in 1..deep {
                         let possibilities = (0..Game::COL)
                             .filter(|&col| !game.col_full(col))
                             .collect::<Vec<usize>>();
@@ -54,7 +54,8 @@ impl Behaviour for Rollout {
                             PlayResult::Error => unreachable!(),
                             PlayResult::Pass => (),
                             PlayResult::Win(_) => {
-                                intent_score += if game.player_turn() == whoami {
+                                let coef =  (deep - actual_deep) as f32 / deep as f32;
+                                let score = if game.player_turn() == whoami {
                                     // on game.play_col() player turn change. So if player
                                     // turn is mine, this mean i just lose the game.
                                     LOSE_SCORE
@@ -62,6 +63,7 @@ impl Behaviour for Rollout {
                                     WIN_SCORE
                                 };
 
+                                intent_score += score * coef;
                                 break;
                             }
                         }
