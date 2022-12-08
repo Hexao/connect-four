@@ -80,7 +80,7 @@ impl Behaviour for Rollout {
             score.into_iter()
                 .enumerate()
                 .filter_map(|(intent, score)| {
-                    if score - max >= -f32::EPSILON {
+                    if max - score <= f32::EPSILON {
                         Some(intent)
                     } else {
                         None

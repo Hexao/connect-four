@@ -2,7 +2,8 @@ use super::{Board, Message as BoardMessage};
 
 use iced::{
     Application, Command, Subscription,
-    time, Element, Canvas, Length,
+    widget::canvas::Canvas,
+    time, Element, Length,
 };
 
 pub enum Menu {
@@ -13,6 +14,7 @@ pub enum Menu {
 impl Application for Menu {
     type Executor = iced::executor::Default;
     type Message = BoardMessage;
+    type Theme = iced::Theme;
     type Flags = ();
 
     fn new(_flags: ()) -> (Self, Command<BoardMessage>) {
@@ -49,7 +51,7 @@ impl Application for Menu {
         }
     }
 
-    fn view(&mut self) -> Element<BoardMessage> {
+    fn view(&self) -> Element<'_, Self::Message, iced::Renderer<Self::Theme>> {
         match self {
             Menu::Start => todo!(),
             Menu::Game(board) => {

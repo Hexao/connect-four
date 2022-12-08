@@ -3,8 +3,8 @@ use crate::behaviour::{Behaviour, Intent};
 use super::{Game, Player, PlayResult};
 
 use iced::{
-    Point, Vector, Rectangle,
-    Command, Color, canvas,
+    widget::canvas, Point, Vector, Rectangle,
+    Command, Color,
 };
 
 use std::time::Instant;
@@ -35,6 +35,8 @@ pub struct Board {
 impl Board {
     const YELLOW_PLAYER: Color = Color::from_rgb(0.8, 0.8, 0.1);
     const RED_PLAYER: Color = Color::from_rgb(0.8, 0.1, 0.1);
+
+    const BACKGROUND: Color = Color::from_rgb(0.275, 0.47, 0.785);
     const BOARD_COLOR: Color = Color::from_rgb(0.1, 0.1, 0.5);
     const WIN_COLOR: Color = Color::from_rgb(0.1, 1.0, 0.1);
 
@@ -269,12 +271,14 @@ fn offset_and_chunk_size(bounds: iced::Size) -> (Point, f32) {
 }
 
 impl canvas::Program<Message> for Board {
-    fn draw(&self, bounds: Rectangle, _cursor: canvas::Cursor) -> Vec<canvas::Geometry> {
+    type State = ();
+
+    fn draw(&self, _state: &Self::State, _theme: &iced::Theme, bounds: Rectangle, _cursor: canvas::Cursor) -> Vec<canvas::Geometry> {
         let (offset, chunk_size) = offset_and_chunk_size(bounds.size());
 
         let game_state = self.game_state.draw(bounds.size(), |frame| {
             let background = canvas::Path::rectangle(Point::ORIGIN, frame.size());
-            frame.fill(&background, Color::from_rgb8(70, 120, 200));
+            frame.fill(&background, Self::BACKGROUND);
 
             let (mut x, mut y) = (0.0, Game::ROW as f32);
 
@@ -386,7 +390,7 @@ impl canvas::Program<Message> for Board {
         }
     }
 
-    fn update(&mut self, event: canvas::Event, bounds: Rectangle, cursor: canvas::Cursor) -> (canvas::event::Status, Option<Message>) {
+    fn update(&self, _state: &mut Self::State, event: canvas::Event, bounds: Rectangle, cursor: canvas::Cursor) -> (canvas::event::Status, Option<Message>) {
         if !self.board_state.finished() && !self.behaviour().process_intent() {
             return (canvas::event::Status::Ignored, None);
         }
@@ -418,6 +422,7 @@ impl canvas::Program<Message> for Board {
                     message = Some(Message::Restart);
                 }
             }
+            canvas::Event::Touch(_) => (),
         }
 
         (canvas::event::Status::Ignored, message)
