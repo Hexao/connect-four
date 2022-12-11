@@ -9,8 +9,9 @@ pub use human::Human;
 use crate::board_game::Game;
 
 pub enum Intent {
-    None, Waiting,
+    Waiting(std::thread::JoinHandle<u8>),
     Some(u8),
+    None,
 }
 
 pub trait Behaviour {
@@ -20,8 +21,4 @@ pub trait Behaviour {
 
     fn start_process(&mut self, state: Game);
     fn intent(&mut self) -> Intent;
-
-    fn handle(&mut self) -> std::thread::JoinHandle<u8> {
-        unimplemented!()
-    }
 }

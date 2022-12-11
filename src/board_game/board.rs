@@ -1,6 +1,6 @@
-use crate::animator::{Animation, Builder};
 use crate::behaviour::{Behaviour, Intent};
-use super::{Game, Player, PlayResult};
+use crate::animator::Animation;
+use super::{Game, Player};
 
 use iced::{
     widget::canvas, Point, Vector, Rectangle,
@@ -44,7 +44,7 @@ impl Board {
     const COIN_SIZE: f32 = 0.85;
 
     pub fn new(mut p1: Box<dyn Behaviour>, p2: Box<dyn Behaviour>) -> Self {
-        let animation = Builder::default()
+        let animation = crate::animator::Builder::default()
             .move_curve(Point::new(Game::COL as f32 / 2.0, -0.5), Vector::new(0.0, 1.0))
             .anim_duration(0.5).build();
 
@@ -93,95 +93,106 @@ impl Board {
         self.now = now;
 
         if self.animation.finished_at(now) {
-            let action =  match self.board_state {
+            match self.board_state {
                 BoardState::Initialize => {
+                    self.board_state.new_action(BoardState::Waiting);
+
                     match self.behaviour_mut().intent() {
-                        Intent::None => BoardState::Waiting,
-                        Intent::Some(sector) => {
-                            self.board_state.new_action(BoardState::Waiting);
-                            self.play(sector);
-
-                            return Command::none();
-                        },
-                        Intent::Waiting => {
-                            let handle = self.behaviour_mut().handle();
-                            self.board_state.new_action(BoardState::Waiting);
-
-                            return Command::perform(wait_handle(handle), Message::Play);
+                        Intent::None => (),
+                        Intent::Some(sector) => self.play(sector),
+                        Intent::Waiting(handle) => {
+                            return Command::perform(wait_handle(handle), Message::Play)
                         }
                     }
                 },
+                BoardState::InitThenPlay => self.play(self.sector),
                 BoardState::SlideThenPlay => {
                     let height = self.game.col_height(self.sector as usize);
 
                     if height != Game::ROW {
+                        self.board_state.new_action(BoardState::Playing);
                         self.play_current_sector(height);
-                        BoardState::Playing
                     } else {
-                        BoardState::Waiting
+                        self.board_state.new_action(BoardState::Waiting);
                     }
                 },
                 BoardState::Playing => {
                     self.game_state.clear();
 
-                    if let PlayResult::Win([x, y, dx, dy]) = self.game.play_col(self.sector as usize) {
+                    let action = if let super::PlayResult::Win([x1, y1, x2, y2]) = self.game.play_col(self.sector as usize) {
                         self.sliding_curve();
 
-                        let start = Point { x: 0.5 + x as f32, y: 0.5 + Game::ROW as f32 - y as f32 };
-                        let end = Point { x: 0.5 + dx as f32, y: 0.5 + Game::ROW as f32 - dy as f32 };
+                        let start = Point { x: 0.5 + x1 as f32, y: 0.5 + Game::ROW as f32 - y1 as f32 };
+                        let end = Point { x: 0.5 + x2 as f32, y: 0.5 + Game::ROW as f32 - y2 as f32 };
                         let direction = end - start;
 
                         self.animation.update_axis(start, direction);
                         self.animation.update_duration(1.0);
                         self.animation.restart();
+
                         BoardState::Win
                     } else if self.game.grid_full() {
                         BoardState::Finished
                     } else {
+                        self.sector = Game::COL as u8 / 2;
                         self.initialize_coin();
-                        self.sector = 3;
 
                         let state = self.game;
                         self.behaviour_mut().start_process(state);
 
                         BoardState::Initialize
-                    }
-                }
-                _ => BoardState::Waiting
-            };
+                    };
 
-            self.board_state.new_action(action);
+                    self.board_state.new_action(action);
+                }
+                _ => {
+                    self.board_state.new_action(BoardState::Waiting);
+                }
+            };
         }
 
         Command::none()
     }
 
     fn slide(&mut self, sector: u8) {
-        let Some(old) = self.board_state.new_action(BoardState::Sliding) else {
-            return;
-        };
+        match self.board_state {
+            BoardState::Sliding => {
+                self.animation.update_ctrl(
+                    Point { x: 0.4, y: 0.4 },
+                    Point { x: 0.5, y: 1.0 }
+                );
+            }
+            BoardState::Waiting => {
+                self.board_state.new_action(BoardState::Sliding);
+                self.sliding_curve();
+            }
+            _ => return,
+        }
 
         self.slide_sector(sector);
-
-        if old == BoardState::Sliding {
-            self.animation.update_ctrl(
-                Point { x: 0.4, y: 0.4 },
-                Point { x: 0.5, y: 1.0 }
-            );
-        } else {
-            self.sliding_curve();
-        }
     }
 
     fn play(&mut self, sector: u8) {
-        if self.sector == sector && self.board_state == BoardState::Waiting {
-            let height = self.game.col_height(self.sector as usize);
-            if height == Game::ROW { return; }
+        if self.board_state == BoardState::Initialize {
+            self.board_state.new_action(BoardState::InitThenPlay);
+            self.sector = sector;
+            return;
+        }
 
-            if self.board_state.new_action(BoardState::Playing).is_some() {
-                self.play_current_sector(height);
-            };
-        } else if self.board_state.new_action(BoardState::SlideThenPlay).is_some() {
+        let height = self.game.col_height(sector as usize);
+        if height == Game::ROW {
+            self.board_state.new_action(BoardState::Sliding);
+            self.slide_sector(sector);
+            return;
+        }
+
+        if self.board_state == BoardState::InitThenPlay {
+            self.sector = 3; // avoid code duplication
+        }
+
+        if self.sector == sector && self.board_state.new_action(BoardState::Playing) {
+            self.play_current_sector(height);
+        } else if self.board_state.new_action(BoardState::SlideThenPlay) {
             self.slide_sector(sector);
         }
     }
@@ -198,6 +209,7 @@ impl Board {
             self.animation.restart();
             self.game_state.clear();
 
+            self.sector = Game::COL as u8 / 2;
             self.initialize_coin();
         }
     }
@@ -218,13 +230,6 @@ impl Board {
         );
     }
 
-    fn playing_curve(&mut self) {
-        self.animation.update_ctrl(
-            Point { x: 0.65, y: 0.0 },
-            Point { x: 0.75, y: 0.5 }
-        );
-    }
-
     fn slide_sector(&mut self, sector: u8) {
         self.sector = sector;
 
@@ -238,12 +243,17 @@ impl Board {
     }
 
     fn play_current_sector(&mut self, height: usize) {
-        self.playing_curve();
-        self.animation.restart();
+        self.animation.update_ctrl(
+            Point { x: 0.65, y: 0.0 },
+            Point { x: 0.75, y: 0.5 }
+        );
+
         self.animation.update_axis(
             Point { x: self.sector as f32 + 0.5, y: 0.5 },
             Vector { x: 0.0, y: (Game::ROW - height) as f32 }
         );
+
+        self.animation.restart();
     }
 
     fn behaviour(&self) -> &dyn Behaviour {
@@ -429,9 +439,10 @@ impl canvas::Program<Message> for Board {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum BoardState {
     Initialize,
+    InitThenPlay,
     Waiting,
     Sliding,
     SlideThenPlay,
@@ -441,37 +452,20 @@ enum BoardState {
 }
 
 impl BoardState {
-    fn new_action(&mut self, action: Self) -> Option<Self> {
-        match (self, action) {
-            (init @ Self::Initialize, Self::Waiting) => {
-                *init = Self::Waiting;
-                Some(Self::Initialize)
-            }
-            (wait @ Self::Waiting, action) if action != Self::Initialize => {
-                *wait = action;
-                Some(Self::Waiting)
-            },
-            (slide @ Self::Sliding, action @ (Self::Waiting | Self::Sliding | Self::SlideThenPlay)) => {
-                *slide = action;
-                Some(Self::Sliding)
-            },
-            (slide @ Self::Sliding, Self::Playing) => {
-                *slide = Self::SlideThenPlay;
-                Some(Self::Sliding)
-            },
-            (slide @ Self::SlideThenPlay, action @ (Self::Playing | Self::Waiting)) => {
-                *slide = action;
-                Some(Self::SlideThenPlay)
-            },
-            (play @ Self::Playing, action @ (Self::Initialize | Self::Win | Self::Finished)) => {
-                *play = action;
-                Some(Self::Playing)
-            },
-            (win @ (Self::Win | Self::Finished), Self::Initialize) => {
-                Some(std::mem::replace(win, Self::Initialize))
-            },
-            _ => None,
-        }
+    fn new_action(&mut self, action: Self) -> bool {
+        match (&self, action) {
+            (Self::Initialize, Self::InitThenPlay | Self::Waiting) => (),
+            (Self::InitThenPlay, Self::Sliding | Self::SlideThenPlay | Self::Playing) => (),
+            (Self::Waiting, Self::Sliding | Self::SlideThenPlay | Self::Playing) => (),
+            (Self::Sliding, Self::Waiting | Self::Sliding | Self::SlideThenPlay) => (),
+            (Self::SlideThenPlay, Self::Playing | Self::Waiting) => (),
+            (Self::Playing, Self::Initialize | Self::Win | Self::Finished) => (),
+            (Self::Win | Self::Finished, Self::Initialize) => (),
+            _ => return false,
+        };
+
+        *self = action;
+        true
     }
 
     fn finished(&self) -> bool {
